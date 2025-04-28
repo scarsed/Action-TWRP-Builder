@@ -131,13 +131,7 @@ jobs:
       run: |
         git clone ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-      
-    - name: Fix Missing maintainer_avatar.png
-      run: |
-        # Create dummy file if missing
-        mkdir -p device/tecno/AD8
-        touch device/tecno/AD8/maintainer_avatar.png
-        
+
     - name: Check Build Tree
       uses: haya14busa/action-cond@v1
       id: buildtree
@@ -162,7 +156,7 @@ jobs:
       run: |
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
-        lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng && make clean && make $mka vendorbootimage -j$(nproc --all)
+        lunch ${{ github.event.inputs.MAKEFILE_NAME }}-eng && make clean && make ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Upload to Release
