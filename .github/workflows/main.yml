@@ -1,0 +1,94 @@
+name: TWRP Vendor Boot Builder
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['*']
+
+env:
+  DEVICE_CODENAME: "AD8"
+  MANUFACTURER: "tecno"
+  TW_BRANCH: "twrp-12.1"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Checkout Device Tree
+      uses: actions/checkout@v4
+      with:
+        repository: scarsed/Tecno-AD8
+        path: device/${MANUFACTURER}/${DEVICE_CODENAME}
+
+    - name: Set up Swap
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 16
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y \
+          git-core gnupg flex bison build-essential zip curl \
+          zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
+          lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
+          libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
+          python3 android-tools-fsutils abootimg simg2img img2simg \
+          cpio lz4-dtbo device-tree-compiler
+
+    - name: Clone TWRP Manifest
+      run: |
+        repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b ${TW_BRANCH}
+        repo sync -j$(nproc) --force-sync --no-clone-bundle --no-tags
+
+    - name: Prepare Device Tree
+      run: |
+        mkdir -p device/${MANUFACTURER}/${DEVICE_CODENAME}
+        cp -R ${GITHUB_WORKSPACE}/device/${MANUFACTURER}/${DEVICE_CODENAME}/* device/${MANUFACTURER}/${DEVICE_CODENAME}/
+
+    - name: Build Recovery
+      run: |
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        lunch twrp_${DEVICE_CODENAME}-eng || lunch omni_${DEVICE_CODENAME}-eng
+        mka recoveryimage
+
+    - name: Download Vendor Boot
+      run: |
+        wget -O vendor_boot.img "https://files.fm/f/8t9a5vj6b7"
+
+    - name: Repack Vendor Boot
+      run: |
+        mkdir -p extracted_vendor_boot
+        unpack_bootimg --boot_img vendor_boot.img --out extracted_vendor_boot
+        
+        gzip -c out/target/product/${DEVICE_CODENAME}/recovery.img > vendor_ramdisk.gz
+        
+        mkbootimg \
+          --kernel extracted_vendor_boot/kernel \
+          --ramdisk vendor_ramdisk.gz \
+          --cmdline "$(cat extracted_vendor_boot/vendor_boot.img-cmdline)" \
+          --base $(cat extracted_vendor_boot/vendor_boot.img-base) \
+          --pagesize $(cat extracted_vendor_boot/vendor_boot.img-pagesize) \
+          --os_version $(cat extracted_vendor_boot/vendor_boot.img-os_version) \
+          --os_patch_level $(cat extracted_vendor_boot/vendor_boot.img-os_patch_level) \
+          --output twrp_vendor_boot_${DEVICE_CODENAME}.img
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: twrp-${DEVICE_CODENAME}-$(date +%Y%m%d)
+        name: "TWRP ${DEVICE_CODENAME} $(date +%Y-%m-%d)"
+        body: "Automated TWRP build for ${DEVICE_CODENAME}"
+        files: |
+          twrp_vendor_boot_${DEVICE_CODENAME}.img
+          out/target/product/${DEVICE_CODENAME}/recovery.img
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
